@@ -34,20 +34,19 @@ def main():
     with open(READY_TO_TRAIN, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
+            
                 record = json.loads(line)
-                puzzle_text = record["puzzle"].strip()
-                task_type = classify_task(puzzle_text)
-                record_id = record["id"]
+                puzzle_raw = record["puzzle"].strip()
                 
-                prompt_input = f"[ID]: {record_id}\n[PUZZLE]: {puzzle_text}"
-                assistant_output = f"{record['output'].strip()}"
-                
-                full_training_text = f"User: {prompt_input}\nAssistant: {assistant_output}"
+                task_type = classify_task(puzzle_raw)
                 
                 payload = {
-                    "id": record_id,
+                    "id": record["id"],
                     "task_type": task_type,
-                    "text": full_training_text
+                    "puzzle": puzzle_raw, 
+                    "target_answer": record.get("target_answer", ""),
+                    "output": record["output"].strip(),
+                    "nemotron_tokens": record.get("nemotron_tokens", None)
                 }
                 pool.append(payload)
 
@@ -60,12 +59,7 @@ def main():
     for dataset, filename in [(train_df, TRAIN_OUTPUT), (val_df, VAL_OUTPUT)]:
         with open(filename, "w", encoding="utf-8") as outfile:
             for _, row in dataset.iterrows():
-                payload = {
-                    "id": row["id"],
-                    "task_type": row["task_type"],
-                    "text": row["text"]
-                }
-                outfile.write(json.dumps(payload) + "\n")
+                outfile.write(json.dumps(row.to_dict(), ensure_ascii=False) + "\n")
 
     print("\n" + "="*50)
     print("DATASET READY")
@@ -77,3 +71,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
