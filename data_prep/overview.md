@@ -9,7 +9,11 @@ I’ve finalized the baseline version of our dataset with CoT and uploaded it to
 * **Pruned & Modular Schema:** The final files are structured as modular `.jsonl` objects. I mapped everything to fields (`id`, `task_type`, `puzzle`, `target_answer`, `output`, `nemotron_tokens`) so it’s easy for anyone to read or modify.
 * **1024 Token Ceiling:** Nemotron tokenizer counts were validated using the sequence layout: `User: [PUZZLE]: ... \nAssistant: ...`. All of the entries in these files fit under 1024 tokens. Hovewer, this sequence is no longer in the dataset, so if you will use a different there might be an issue.
 
-### Current Progress & Next Steps
+### V1
 * **The 15% Salvage Queue:** The Chain-of-Thought (CoT) traces were generated using `gemini-3.1-flash-lite`. About 15% of the raw generations failed/cut off because the native Gemini sequences ran too long. I am currently re-running and compressing this chunk locally; once done, I’ll attach them to a new version of the dataset.
+
+### V2
+whole dataset (without 2 rows) is now included
+
 * **Messy Source Files:** I will later push more of the raw intermediate files to GitHub just in case anyone wants them, but they are incredibly messy right now, so I wouldn't recommend reading through them unless you absolutely have to.
 
