@@ -1,0 +1,48 @@
+# Example SFT LoRA configuration for a future Nemotron reasoning run.
+# This file is documentation/config only. Check all values against the target
+# Kaggle/runtime hardware before using them for real training.
+
+model:
+  base_model: metric/nemotron-3-nano-30b-a3b-bf16/transformers/default
+  local_model_path: null
+  note: Use a local or runtime-provided model path for real training unless download is explicitly allowed.
+
+data:
+  train_file: submission/data/sft_sample.jsonl
+  eval_file: submission/data/sft_sample.jsonl
+  format: messages_jsonl
+  user_role: user
+  assistant_role: assistant
+  final_answer_format: "\\boxed{...}"
+
+sequence:
+  max_length: 2048
+  max_supported_length_reminder: 8192
+  note: Use smaller lengths for local smoke tests; confirm the final value in the target runtime.
+
+lora:
+  r: 16
+  max_rank_reminder: 32
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  output_dir: submission/adapters/nemotron_lora
+  learning_rate: 0.0002
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  logging_steps: 10
+  save_strategy: epoch
+  bf16: true
+  gradient_checkpointing: true
+
+packaging:
+  adapter_dir: submission/adapters/nemotron_lora
+  output_zip: submission/submission_zip/nemotron_lora_adapter.zip
