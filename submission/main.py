@@ -13,18 +13,28 @@ if __package__ in {None, ""}:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from submission.scripts import (
+        analyze_errors,
         build_sft_jsonl,
         inspect_data,
+        make_eval_subset,
+        make_prediction_template,
         package_adapter,
+        run_inference,
+        score_outputs,
         train_lora_sft,
         validate_adapter,
         validate_submission_layout,
     )
 else:
     from .scripts import (
+        analyze_errors,
         build_sft_jsonl,
         inspect_data,
+        make_eval_subset,
+        make_prediction_template,
         package_adapter,
+        run_inference,
+        score_outputs,
         train_lora_sft,
         validate_adapter,
         validate_submission_layout,
@@ -35,6 +45,11 @@ COMMANDS = {
     "validate": validate_submission_layout.main,
     "inspect-data": inspect_data.main,
     "build-sft": build_sft_jsonl.main,
+    "make-eval-subset": make_eval_subset.main,
+    "make-prediction-template": make_prediction_template.main,
+    "score-outputs": score_outputs.main,
+    "analyze-errors": analyze_errors.main,
+    "run-inference": run_inference.main,
     "train-lora": train_lora_sft.main,
     "validate-adapter": validate_adapter.main,
     "package-adapter": package_adapter.main,
@@ -48,6 +63,11 @@ def print_help() -> None:
     print("  validate      Validate local submission workspace layout")
     print("  inspect-data  Inspect a prepared JSONL data file")
     print("  build-sft     Build SFT-style JSONL under submission/data/")
+    print("  make-eval-subset  Build a small local proxy eval subset")
+    print("  make-prediction-template  Build an empty prediction JSONL template")
+    print("  score-outputs  Score predictions with the local proxy metric")
+    print("  analyze-errors  Write a Markdown error analysis report")
+    print("  run-inference  Run guarded local model inference")
     print("  train-lora    Validate inputs and dry-run future LoRA SFT training")
     print("  validate-adapter  Validate local LoRA adapter metadata")
     print("  package-adapter   Package a real adapter into submission_zip/")

@@ -18,6 +18,7 @@ REQUIRED_DIRS = [
     "configs",
     "data",
     "notebooks",
+    "reports",
     "scripts",
     "submission_zip",
 ]
@@ -30,9 +31,15 @@ REQUIRED_FILES = [
     "configs/lora_config.example.yaml",
     "configs/sft_lora_config.example.yaml",
     "scripts/__init__.py",
+    "scripts/analyze_errors.py",
     "scripts/build_sft_jsonl.py",
     "scripts/inspect_data.py",
+    "scripts/make_eval_subset.py",
+    "scripts/make_prediction_template.py",
     "scripts/package_adapter.py",
+    "scripts/prompting.py",
+    "scripts/run_inference.py",
+    "scripts/score_outputs.py",
     "scripts/train_lora_sft.py",
     "scripts/validate_adapter.py",
     "scripts/validate_submission_layout.py",
@@ -51,6 +58,12 @@ ADAPTER_MARKERS = [
 TOOL_FILES = {
     "data inspector": "scripts/inspect_data.py",
     "SFT builder": "scripts/build_sft_jsonl.py",
+    "eval subset builder": "scripts/make_eval_subset.py",
+    "prediction template builder": "scripts/make_prediction_template.py",
+    "local proxy scorer": "scripts/score_outputs.py",
+    "error analyzer": "scripts/analyze_errors.py",
+    "prompt utilities": "scripts/prompting.py",
+    "inference runner": "scripts/run_inference.py",
     "training scaffold": "scripts/train_lora_sft.py",
     "adapter validator": "scripts/validate_adapter.py",
     "package builder": "scripts/package_adapter.py",
@@ -91,6 +104,25 @@ def find_real_adapter_dirs(root: Path) -> list[Path]:
 def find_packages(root: Path) -> list[Path]:
     package_root = root / "submission_zip"
     return sorted(package_root.glob("*.zip"))
+
+
+def find_prediction_files(root: Path) -> list[Path]:
+    data_root = root / "data"
+    patterns = ("*predictions*.jsonl", "prediction_template*.jsonl")
+    found: list[Path] = []
+    for pattern in patterns:
+        found.extend(path for path in data_root.glob(pattern) if path.is_file())
+    return sorted(set(found))
+
+
+def find_scored_outputs(root: Path) -> list[Path]:
+    data_root = root / "data"
+    return sorted(path for path in data_root.glob("scored*.jsonl") if path.is_file())
+
+
+def find_error_reports(root: Path) -> list[Path]:
+    reports_root = root / "reports"
+    return sorted(path for path in reports_root.glob("*.md") if path.is_file())
 
 
 def package_has_adapter_files(path: Path) -> bool:
@@ -151,6 +183,9 @@ def validate(strict_data: bool, strict_adapter: bool, strict_package: bool) -> i
     adapter_markers = find_adapter_markers(root)
     real_adapter_dirs = find_real_adapter_dirs(root)
     packages = find_packages(root)
+    prediction_files = find_prediction_files(root)
+    scored_outputs = find_scored_outputs(root)
+    error_reports = find_error_reports(root)
     valid_package_candidates = [path for path in packages if package_has_adapter_files(path)]
     state = workspace_state(data_files, real_adapter_dirs, packages)
 
@@ -168,11 +203,19 @@ def validate(strict_data: bool, strict_adapter: bool, strict_package: bool) -> i
             print(f"  - {path}")
 
     print_tool_status(root)
-    print_paths("Training data JSONL files under data/", data_files, root)
+    print_paths("JSONL files under data/", data_files, root)
+    print_paths("Prediction JSONL files under data/", prediction_files, root)
+    print_paths("Scored output JSONL files under data/", scored_outputs, root)
+    print_paths("Error reports under reports/", error_reports, root)
     print_paths("Adapter markers found", adapter_markers, root)
     print_paths("Real adapter directories", real_adapter_dirs, root)
     print_paths("Package files found", packages, root)
     print_paths("Package files containing adapter config and weights", valid_package_candidates, root)
+
+    if not adapter_markers:
+        print("Adapter state: no adapter marker files are present; this is expected for the current scaffold.")
+    if not packages:
+        print("Package state: no final .zip package is present; this is expected for the current scaffold.")
 
     for adapter_dir in real_adapter_dirs:
         rank = read_adapter_rank(adapter_dir)
@@ -194,14 +237,15 @@ def validate(strict_data: bool, strict_adapter: bool, strict_package: bool) -> i
         print("Layout validation failed.")
         return 1
 
+    print("Official competition readiness: not assessed by this local validator.")
     if not real_adapter_dirs:
-        print("Competition readiness: not ready; no real adapter marker files are present.")
+        print("Local package state: scaffold valid; no real adapter exists yet.")
     elif not packages:
-        print("Competition readiness: adapter files present, but no final .zip package is present.")
+        print("Local package state: adapter files are present, but no final .zip package exists yet.")
     elif not valid_package_candidates:
-        print("Competition readiness: zip files exist, but none contain both adapter_config.json and adapter weights.")
+        print("Local package state: zip files exist, but none contain both adapter_config.json and adapter weights.")
     else:
-        print("Competition readiness: package files contain adapter markers, but official format is not validated here.")
+        print("Local package state: package files contain adapter markers; official format is still unvalidated.")
 
     print("Layout validation passed.")
     return 0

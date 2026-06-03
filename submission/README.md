@@ -1,124 +1,183 @@
 # NVIDIA Nemotron Reasoning Submission Workspace
 
-This folder is the submission-side workspace for a lightweight Nemotron LoRA reasoning-challenge workflow. The root repository and `data_prep/` files are treated as read-only context from here.
+This folder contains the submission-side workflow for the NVIDIA Nemotron reasoning challenge. It is currently a scaffold with local proxy evaluation tools and a guarded base-model inference entrypoint. Files outside `submission/`, including `../data_prep/`, are treated as read-only context.
 
-The `../data_prep/` path is relative to this README. The command examples below assume they are run from the repository root.
+## Current Position
 
-## Current scope
+- Prepared challenge data exists outside this folder under `../data_prep/`.
+- `submission/data/sft_sample.jsonl` contains a 10-row SFT-format smoke-test sample.
+- `submission/data/eval_subset_50.jsonl` contains a small local proxy evaluation subset.
+- Local proxy evaluation tools exist for subset creation, prediction templating, scoring, and error analysis.
+- A guarded `run-inference` command exists for base-model inference in a GPU/runtime environment.
+- No real model inference has been run unless a real prediction file such as `submission/data/base_predictions_50.jsonl` exists.
+- No LoRA training has been run by this scaffold.
+- No real adapter exists under `submission/adapters/`.
+- No final zip package exists under `submission/submission_zip/`.
+- The local proxy metric is not the official competition metric.
 
-- Keep challenge-specific submission files under `submission/`.
-- Use prepared JSONL data from `../data_prep/` as read-only inputs unless copied intentionally into `submission/data/`.
-- Train or place LoRA adapter outputs under `submission/adapters/`.
-- Build any final package artifacts under `submission/submission_zip/`.
-- Validate layout with a local check before packaging.
+## Validate The Scaffold
 
-## Observed input data
-
-The prepared data outside this folder currently uses JSONL records with these fields:
-
-- `id`
-- `task_type`
-- `puzzle`
-- `target_answer`
-- `output`
-- `nemotron_tokens`
-
-The observed split files are:
-
-- `../data_prep/nemotron_train_v1.jsonl`
-- `../data_prep/nemotron_val_v1.jsonl`
-
-Those files were inspected as read-only context and were not modified by this setup pass.
-
-## Suggested workflow
-
-1. Review `configs/lora_config.example.yaml` and copy it to a run-specific config when training details are known.
-2. Keep local or Kaggle-mounted data references lightweight. Do not commit large datasets or model weights here.
-3. Inspect the prepared read-only validation data:
-
-   ```bash
-   python3 -m submission.main inspect-data data_prep/nemotron_val_v1.jsonl --limit 3
-   ```
-
-4. Build a small SFT sample under `submission/data/`:
-
-   ```bash
-   python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_sample.jsonl --limit 10
-   ```
-
-5. Validate the current submission workspace layout:
-
-   ```bash
-   python3 -m submission.main validate
-   ```
-
-6. Run a dry-run training plan check:
-
-   ```bash
-   python3 -m submission.main train-lora --dry-run --train-file submission/data/sft_sample.jsonl --eval-file submission/data/sft_sample.jsonl --output-dir submission/adapters/dry_run_adapter
-   ```
-
-7. Train a LoRA adapter in the target runtime once assumptions are confirmed, then write real adapter artifacts under `adapters/`.
-8. Validate the real adapter directory:
-
-   ```bash
-   python3 -m submission.main validate-adapter submission/adapters/nemotron_lora
-   ```
-
-9. Package final challenge artifacts under `submission_zip/` once the required competition format is confirmed.
-
-## Utility commands
-
-Inspect a JSONL file without loading it fully into memory:
-
-```bash
-python3 -m submission.main inspect-data data_prep/nemotron_train_v1.jsonl --limit 5
-```
-
-Preview SFT conversion without writing a file:
-
-```bash
-python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_sample.jsonl --limit 2 --dry-run
-```
-
-Build a small sample file:
-
-```bash
-python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_sample.jsonl --limit 10
-```
-
-Validate scaffold, data, adapter, and zip-package state:
+Run from the repository root:
 
 ```bash
 python3 -m submission.main validate
 ```
 
-Run a future LoRA SFT training dry-run:
+Normal validation checks local scaffold files and reports current adapter/package absence as expected scaffold state. It does not prove competition readiness.
+
+Strict checks are available when you intentionally want failures until real artifacts exist:
+
+```bash
+python3 -m submission.main validate --require-data --strict-adapter --strict-package
+```
+
+## Build A Local Eval Subset
+
+Create a small subset under `submission/data/`:
+
+```bash
+python3 -m submission.main make-eval-subset data_prep/nemotron_val_v1.jsonl submission/data/eval_subset_50.jsonl --limit 50 --seed 42
+```
+
+The subset builder preserves only `id`, `task_type`, `puzzle`, and `target_answer`. It uses a small default limit so it does not copy the full dataset by default.
+
+## Dry-Run Base-Model Inference
+
+Dry-run mode validates the input file, output path, adapter metadata if provided, model access policy, and prompt formatting. It does not import heavy ML libraries, load a model, download a model, or write predictions.
+
+```bash
+python3 -m submission.main run-inference \
+  --input submission/data/eval_subset_50.jsonl \
+  --output submission/data/base_predictions_50.jsonl \
+  --model-name-or-path /path/to/local/Nemotron-3-Nano-30B \
+  --backend transformers \
+  --limit 3 \
+  --dry-run
+```
+
+The prompt asks for concise reasoning and requires the final answer in exactly one `\boxed{...}` expression. Intermediate values should not be boxed.
+
+## Run Real Base-Model Inference
+
+Run real inference only in a runtime with the model already available locally, suitable GPU memory, and required dependencies installed. The default mode refuses remote model identifiers unless `--allow-download` is explicitly passed.
+
+```bash
+python3 -m submission.main run-inference \
+  --input submission/data/eval_subset_50.jsonl \
+  --output submission/data/base_predictions_50.jsonl \
+  --model-name-or-path /path/to/local/Nemotron-3-Nano-30B \
+  --backend transformers \
+  --max-tokens 512 \
+  --temperature 0.0 \
+  --top-p 1.0
+```
+
+For an adapter-backed run after a real adapter exists:
+
+```bash
+python3 -m submission.main run-inference \
+  --input submission/data/eval_subset_50.jsonl \
+  --output submission/data/adapter_predictions_50.jsonl \
+  --model-name-or-path /path/to/local/Nemotron-3-Nano-30B \
+  --adapter-dir submission/adapters/nemotron_lora \
+  --backend transformers
+```
+
+Do not start LoRA training before establishing a base-model inference baseline and scoring it locally.
+
+## Create A Prediction Template
+
+Create an empty prediction file matching the eval subset ids:
+
+```bash
+python3 -m submission.main make-prediction-template submission/data/eval_subset_50.jsonl submission/data/prediction_template_50.jsonl
+```
+
+The prediction schema is:
+
+```json
+{"id": "example-id", "prediction": ""}
+```
+
+For manual review, include puzzle text:
+
+```bash
+python3 -m submission.main make-prediction-template submission/data/eval_subset_50.jsonl submission/data/prediction_template_50_with_puzzles.jsonl --include-puzzle
+```
+
+## Score Predictions With The Local Proxy Metric
+
+Score a prediction JSONL against a reference subset:
+
+```bash
+python3 -m submission.main score-outputs --references submission/data/eval_subset_50.jsonl --predictions submission/data/base_predictions_50.jsonl --output submission/data/scored_base_50.jsonl
+```
+
+The scorer:
+
+- matches rows by `id`;
+- compares `prediction` against `target_answer`;
+- prioritizes the last `\boxed{...}` answer in a prediction;
+- falls back to numeric extraction only when no boxed answer exists;
+- supports normalized exact string match;
+- supports relative numeric tolerance;
+- writes a scored JSONL report;
+- prints total examples, correct, incorrect, missing predictions, accuracy, boxed-answer rate, and numeric-fallback rate.
+
+This is a local proxy metric only. It is not the official leaderboard or competition metric.
+
+## Generate An Error Report
+
+```bash
+python3 -m submission.main analyze-errors submission/data/scored_base_50.jsonl submission/reports/error_report_base_50.md
+```
+
+The report groups incorrect rows by `task_type` when available and counts non-exclusive error indicators:
+
+- missing prediction;
+- no boxed answer;
+- numeric fallback used;
+- exact mismatch;
+- numeric mismatch.
+
+## Existing Empty-Template Smoke Check
+
+The current empty prediction template can be scored as a smoke check:
+
+```bash
+python3 -m submission.main score-outputs --references submission/data/eval_subset_50.jsonl --predictions submission/data/prediction_template_50.jsonl --output submission/data/scored_template_50.jsonl
+python3 -m submission.main analyze-errors submission/data/scored_template_50.jsonl submission/reports/error_report_template_50.md
+```
+
+It should score 0 accuracy because the predictions are intentionally empty.
+
+## SFT And Adapter Utilities
+
+Build a small SFT sample:
+
+```bash
+python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_sample.jsonl --limit 10 --overwrite
+```
+
+Run a dry-run LoRA plan check:
 
 ```bash
 python3 -m submission.main train-lora --dry-run --train-file submission/data/sft_sample.jsonl --eval-file submission/data/sft_sample.jsonl --output-dir submission/adapters/dry_run_adapter
 ```
 
-Validate a real adapter directory after training:
+Real training remains intentionally unimplemented in this scaffold. The command validates inputs and prints a plan in dry-run mode only.
+
+After a real adapter is trained elsewhere, validate and package it with:
 
 ```bash
 python3 -m submission.main validate-adapter submission/adapters/nemotron_lora
-```
-
-Package a real adapter after validation:
-
-```bash
 python3 -m submission.main package-adapter --adapter-dir submission/adapters/nemotron_lora --output-zip submission/submission_zip/nemotron_lora_adapter.zip
 ```
 
 The package command refuses to create a zip unless the adapter directory contains `adapter_config.json` and an adapter weight file such as `adapter_model.safetensors` or `adapter_model.bin`.
 
-## Notes
+## Boundaries
 
-- This scaffold does not download the Nemotron base model.
-- This scaffold does not run the competition benchmark.
-- The SFT sample builder does not train a model.
-- The training command is dry-run-first. Real training is not implemented or run in this setup pass.
-- Real adapter outputs should be written under `submission/adapters/`.
-- A final package must ultimately contain a compatible LoRA adapter for Nemotron-3-Nano-30B, but this workspace does not prove leaderboard or benchmark compatibility.
-- The validator only checks expected local files and folders; it does not prove competition compatibility.
+- Do not place full base model weights in `submission/`.
+- Do not treat the local proxy score as an official benchmark result.
+- Do not claim competition readiness until a real adapter exists, the official package format is confirmed, and the official evaluation path is run.
