@@ -1,19 +1,8 @@
 # NVIDIA Nemotron Reasoning Submission Workspace
 
-This folder contains the submission-side workflow for the NVIDIA Nemotron reasoning challenge. It is currently a scaffold with local proxy evaluation tools and a guarded base-model inference entrypoint. Files outside `submission/`, including `../data_prep/`, are treated as read-only context.
+This folder contains the submission-side workflow for the NVIDIA Nemotron reasoning challenge. It is currently a scaffold with local proxy evaluation tools, SFT sample conversion, adapter/package validation, dependency preflights, and a guarded base-model inference entrypoint.
 
-## Current Position
-
-- Prepared challenge data exists outside this folder under `../data_prep/`.
-- `submission/data/sft_sample.jsonl` contains a 10-row SFT-format smoke-test sample.
-- `submission/data/eval_subset_50.jsonl` contains a small local proxy evaluation subset.
-- Local proxy evaluation tools exist for subset creation, prediction templating, scoring, and error analysis.
-- A guarded `run-inference` command exists for base-model inference in a GPU/runtime environment.
-- No real model inference has been run unless a real prediction file such as `submission/data/base_predictions_50.jsonl` exists.
-- No LoRA training has been run by this scaffold.
-- No real adapter exists under `submission/adapters/`.
-- No final zip package exists under `submission/submission_zip/`.
-- The local proxy metric is not the official competition metric.
+Read `submission/WHAT_HAS_BEEN_DONE_AND_TODO.md` for the current handoff state, completed work, known blockers, and next steps.
 
 ## Validate The Scaffold
 
@@ -23,12 +12,32 @@ Run from the repository root:
 python3 -m submission.main validate
 ```
 
+On this Windows workspace, use the venv Python explicitly:
+
+```bash
+.venv\Scripts\python.exe -m submission.main validate
+```
+
 Normal validation checks local scaffold files and reports current adapter/package absence as expected scaffold state. It does not prove competition readiness.
 
 Strict checks are available when you intentionally want failures until real artifacts exist:
 
 ```bash
 python3 -m submission.main validate --require-data --strict-adapter --strict-package
+```
+
+Check dependency availability without loading a model or touching the network:
+
+```bash
+.venv\Scripts\python.exe -m submission.main check-env
+```
+
+For the local Transformers backend, `mamba_ssm` must be available because the Nemotron H custom model code imports it.
+
+Check an external model cache without loading weights:
+
+```bash
+.venv\Scripts\python.exe -m submission.main check-model-cache E:\kagglehub\models\metric\nemotron-3-nano-30b-a3b-bf16\transformers\default\1 --expected-shards 13
 ```
 
 ## Build A Local Eval Subset
@@ -52,6 +61,7 @@ python3 -m submission.main run-inference \
   --model-name-or-path /path/to/local/Nemotron-3-Nano-30B \
   --backend transformers \
   --limit 3 \
+  --trust-remote-code \
   --dry-run
 ```
 
@@ -61,6 +71,20 @@ The prompt asks for concise reasoning and requires the final answer in exactly o
 
 Run real inference only in a runtime with the model already available locally, suitable GPU memory, and required dependencies installed. The default mode refuses remote model identifiers unless `--allow-download` is explicitly passed.
 
+To download the KaggleHub model locally first, use the submission downloader. It defaults the KaggleHub cache to `E:\kagglehub` so the full model is stored on the larger `E:` drive:
+
+```bash
+python3 submission/model_dwnld.py
+```
+
+Override the cache location only if another large local drive is available:
+
+```bash
+python3 submission/model_dwnld.py --cache-dir E:\kagglehub
+```
+
+Before real inference, the model cache preflight should pass.
+
 ```bash
 python3 -m submission.main run-inference \
   --input submission/data/eval_subset_50.jsonl \
@@ -69,7 +93,12 @@ python3 -m submission.main run-inference \
   --backend transformers \
   --max-tokens 512 \
   --temperature 0.0 \
-  --top-p 1.0
+  --top-p 1.0 \
+  --trust-remote-code \
+  --offload-folder E:\kagglehub\offload\nemotron-base \
+  --torch-dtype float16 \
+  --gpu-memory 6GiB \
+  --cpu-memory 8GiB
 ```
 
 For an adapter-backed run after a real adapter exists:
@@ -112,6 +141,8 @@ Score a prediction JSONL against a reference subset:
 ```bash
 python3 -m submission.main score-outputs --references submission/data/eval_subset_50.jsonl --predictions submission/data/base_predictions_50.jsonl --output submission/data/scored_base_50.jsonl
 ```
+
+Pass `--overwrite` when replacing an existing scored output file.
 
 The scorer:
 
@@ -159,10 +190,23 @@ Build a small SFT sample:
 python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_sample.jsonl --limit 10 --overwrite
 ```
 
+Build the current 100-row dry-run samples:
+
+```bash
+python3 -m submission.main build-sft data_prep/nemotron_train_v1.jsonl submission/data/sft_train_sample_100.jsonl --limit 100
+python3 -m submission.main build-sft data_prep/nemotron_val_v1.jsonl submission/data/sft_val_sample_100.jsonl --limit 100
+```
+
 Run a dry-run LoRA plan check:
 
 ```bash
 python3 -m submission.main train-lora --dry-run --train-file submission/data/sft_sample.jsonl --eval-file submission/data/sft_sample.jsonl --output-dir submission/adapters/dry_run_adapter
+```
+
+Run the current 100-row dry-run check:
+
+```bash
+python3 -m submission.main train-lora --dry-run --train-file submission/data/sft_train_sample_100.jsonl --eval-file submission/data/sft_val_sample_100.jsonl --output-dir submission/adapters/dry_run_adapter
 ```
 
 Real training remains intentionally unimplemented in this scaffold. The command validates inputs and prints a plan in dry-run mode only.
@@ -175,6 +219,8 @@ python3 -m submission.main package-adapter --adapter-dir submission/adapters/nem
 ```
 
 The package command refuses to create a zip unless the adapter directory contains `adapter_config.json` and an adapter weight file such as `adapter_model.safetensors` or `adapter_model.bin`.
+
+See `submission/WHAT_HAS_BEEN_DONE_AND_TODO.md` for the saved workflow notes and next gates.
 
 ## Boundaries
 

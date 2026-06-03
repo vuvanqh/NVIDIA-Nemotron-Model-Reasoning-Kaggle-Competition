@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .prompting import build_reasoning_prompt
 
@@ -22,10 +22,30 @@ DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_TOP_P = 1.0
 ADAPTER_WEIGHT_FILES = ("adapter_model.safetensors", "adapter_model.bin")
+TORCH_DTYPE_CHOICES = ("auto", "float16", "bfloat16", "float32")
 
 
 def submission_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def enable_submission_vendor_imports() -> None:
+    vendor_root = submission_root() / "vendor"
+    if vendor_root.is_dir():
+        vendor_path = str(vendor_root)
+        if vendor_path not in sys.path:
+            sys.path.insert(0, vendor_path)
+
+
+def force_optional_cuda_backend_fallbacks() -> None:
+    try:
+        from transformers.utils import import_utils
+    except ImportError:
+        return
+
+    # The local vendor shim only provides gated RMSNorm for the model's slow
+    # PyTorch path; it is not the full mamba-ssm CUDA backend.
+    import_utils.is_mamba_2_ssm_available = lambda: False
 
 
 def resolve_path(path: Path) -> Path:
@@ -128,36 +148,103 @@ def write_predictions(output_path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def read_existing_prediction_ids(output_path: Path) -> set[str]:
+    if not output_path.is_file():
+        return set()
+
+    ids: set[str] = set()
+    with output_path.open("r", encoding="utf-8") as handle:
+        for row_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{output_path}: row {row_number}: invalid JSON in existing predictions: {exc}") from None
+            if not isinstance(record, dict):
+                raise ValueError(f"{output_path}: row {row_number}: existing prediction is not an object")
+            row_id = record.get("id")
+            if row_id not in (None, ""):
+                ids.add(str(row_id))
+    return ids
+
+
+def append_prediction(handle: Any, record: dict[str, Any]) -> None:
+    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    handle.flush()
+
+
 def generate_with_transformers(
     rows: list[dict[str, Any]],
     model_name_or_path: str,
     adapter_dir: Path | None,
+    offload_folder: Path | None,
+    torch_dtype_name: str,
+    gpu_memory: str | None,
+    cpu_memory: str | None,
+    use_cache: bool,
+    use_mamba_kernels: bool | None,
     max_tokens: int,
     temperature: float,
     top_p: float,
     allow_download: bool,
     trust_remote_code: bool,
     include_puzzle: bool,
+    prediction_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
+    enable_submission_vendor_imports()
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
         raise RuntimeError(
             "missing transformers backend dependencies; install torch and transformers in the target runtime"
         ) from exc
+    force_optional_cuda_backend_fallbacks()
+
+    config = AutoConfig.from_pretrained(
+        model_name_or_path,
+        trust_remote_code=trust_remote_code,
+        local_files_only=not allow_download,
+    )
+    config.use_cache = use_cache
+    if use_mamba_kernels is not None and hasattr(config, "use_mamba_kernels"):
+        config.use_mamba_kernels = use_mamba_kernels
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
         trust_remote_code=trust_remote_code,
         local_files_only=not allow_download,
     )
+    dtype_by_name = {
+        "auto": "auto",
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+    model_kwargs = {
+        "trust_remote_code": trust_remote_code,
+        "local_files_only": not allow_download,
+        "device_map": "auto",
+        "torch_dtype": dtype_by_name[torch_dtype_name],
+        "low_cpu_mem_usage": True,
+        "config": config,
+    }
+    max_memory: dict[int | str, str] = {}
+    if gpu_memory:
+        max_memory[0] = gpu_memory
+    if cpu_memory:
+        max_memory["cpu"] = cpu_memory
+    if max_memory:
+        model_kwargs["max_memory"] = max_memory
+    if offload_folder is not None:
+        offload_folder.mkdir(parents=True, exist_ok=True)
+        model_kwargs["offload_folder"] = str(offload_folder)
+        model_kwargs["offload_state_dict"] = True
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
-        trust_remote_code=trust_remote_code,
-        local_files_only=not allow_download,
-        device_map="auto",
-        torch_dtype="auto",
+        **model_kwargs,
     )
 
     if adapter_dir is not None:
@@ -181,6 +268,7 @@ def generate_with_transformers(
             "max_new_tokens": max_tokens,
             "do_sample": do_sample,
             "pad_token_id": tokenizer.eos_token_id,
+            "use_cache": use_cache,
         }
         if do_sample:
             generation_kwargs["temperature"] = temperature
@@ -192,7 +280,10 @@ def generate_with_transformers(
         prompt_tokens = inputs["input_ids"].shape[-1]
         continuation_ids = output_ids[0][prompt_tokens:]
         prediction = tokenizer.decode(continuation_ids, skip_special_tokens=True).strip()
-        generated.append(prediction_record(source, prediction, include_puzzle=include_puzzle))
+        record = prediction_record(source, prediction, include_puzzle=include_puzzle)
+        generated.append(record)
+        if prediction_callback is not None:
+            prediction_callback(record)
 
     return generated
 
@@ -217,6 +308,12 @@ def print_dry_run_plan(
         "rows_planned": len(rows),
         "model_name_or_path": args.model_name_or_path,
         "adapter_dir": str(adapter_dir) if adapter_dir else None,
+        "offload_folder": str(resolve_path(args.offload_folder)) if args.offload_folder else None,
+        "torch_dtype": args.torch_dtype,
+        "gpu_memory": args.gpu_memory,
+        "cpu_memory": args.cpu_memory,
+        "use_cache": args.use_cache,
+        "use_mamba_kernels": args.use_mamba_kernels,
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
         "top_p": args.top_p,
@@ -245,33 +342,75 @@ def run(args: argparse.Namespace) -> int:
     output_path = ensure_output_under_submission_data(args.output, args.allow_output_outside_submission_data)
     validate_model_access(args.model_name_or_path, args.allow_download, args.dry_run)
     adapter_dir = validate_adapter_dir(args.adapter_dir)
+    offload_folder = resolve_path(args.offload_folder) if args.offload_folder else None
     rows = read_eval_jsonl(input_path, args.limit)
 
     if args.dry_run:
         print_dry_run_plan(rows, input_path, output_path, args, adapter_dir)
         return 0
 
-    if output_path.exists() and not args.overwrite:
+    if output_path.exists() and not args.overwrite and not args.resume:
         raise ValueError(f"output file already exists; pass --overwrite to replace it: {output_path}")
 
+    existing_ids: set[str] = set()
+    output_mode = "w"
+    if args.resume:
+        existing_ids = read_existing_prediction_ids(output_path)
+        rows_before_resume = len(rows)
+        rows = [row for row in rows if str(row["id"]) not in existing_ids]
+        skipped = rows_before_resume - len(rows)
+        output_mode = "a"
+        print(f"Resume mode: found {len(existing_ids)} existing prediction ids; skipped {skipped} input rows.")
+
+    output_handle = None
+    streamed_count = 0
+
+    def stream_prediction(record: dict[str, Any]) -> None:
+        nonlocal output_handle, streamed_count
+        if output_handle is None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_handle = output_path.open(output_mode, encoding="utf-8")
+        append_prediction(output_handle, record)
+        streamed_count += 1
+
+    if not rows:
+        if args.resume and not output_path.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.touch()
+        print(f"No rows to run. Existing predictions are in {output_path}")
+        return 0
+
     if args.backend == "transformers":
-        predictions = generate_with_transformers(
-            rows=rows,
-            model_name_or_path=args.model_name_or_path,
-            adapter_dir=adapter_dir,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            allow_download=args.allow_download,
-            trust_remote_code=args.trust_remote_code,
-            include_puzzle=args.include_puzzle,
-        )
+        try:
+            predictions = generate_with_transformers(
+                rows=rows,
+                model_name_or_path=args.model_name_or_path,
+                adapter_dir=adapter_dir,
+                offload_folder=offload_folder,
+                torch_dtype_name=args.torch_dtype,
+                gpu_memory=args.gpu_memory,
+                cpu_memory=args.cpu_memory,
+                use_cache=args.use_cache,
+                use_mamba_kernels=args.use_mamba_kernels,
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                allow_download=args.allow_download,
+                trust_remote_code=args.trust_remote_code,
+                include_puzzle=args.include_puzzle,
+                prediction_callback=stream_prediction,
+            )
+        finally:
+            if output_handle is not None:
+                output_handle.close()
     elif args.backend == "vllm":
         predictions = run_vllm_backend()
     else:
         raise ValueError(f"unsupported backend: {args.backend}")
 
-    write_predictions(output_path, predictions)
+    if streamed_count == 0:
+        write_predictions(output_path, predictions)
+
     print(f"Wrote {len(predictions)} predictions to {output_path}")
     print("These are local model predictions, not official competition results.")
     return 0
@@ -283,6 +422,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", required=True, type=Path, help="Prediction JSONL output path under submission/data/.")
     parser.add_argument("--model-name-or-path", required=True, help="Local model path, or remote identifier with --allow-download.")
     parser.add_argument("--adapter-dir", type=Path, help="Optional LoRA adapter directory with adapter config and weights.")
+    parser.add_argument("--offload-folder", type=Path, help="Optional disk offload folder for device_map=auto model loading.")
+    parser.add_argument("--torch-dtype", choices=TORCH_DTYPE_CHOICES, default="auto", help="Model load dtype. Defaults to auto.")
+    parser.add_argument("--gpu-memory", help="Max memory for GPU 0, e.g. 6GiB. Passed to from_pretrained max_memory.")
+    parser.add_argument("--cpu-memory", help="Max CPU memory, e.g. 8GiB. Passed to from_pretrained max_memory.")
+    parser.add_argument("--use-cache", action="store_true", help="Enable generation KV/cache state. Disabled by default for lower-memory local smoke runs.")
+    parser.add_argument(
+        "--use-mamba-kernels",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Request the model's fast Mamba kernels when available. Defaults to false for the local fallback path.",
+    )
     parser.add_argument("--backend", choices=("transformers", "vllm"), default=DEFAULT_BACKEND, help="Inference backend.")
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS, help="Maximum new tokens to generate.")
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE, help="Sampling temperature. Defaults to 0.0.")
@@ -293,6 +443,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to model/tokenizer loading.")
     parser.add_argument("--include-puzzle", action="store_true", help="Include puzzle text in prediction output rows.")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing output file in real inference mode.")
+    parser.add_argument("--resume", action="store_true", help="Append missing predictions and skip ids already present in --output.")
     parser.add_argument(
         "--allow-output-outside-submission-data",
         action="store_true",
@@ -305,7 +456,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         return run(args)
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, ImportError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

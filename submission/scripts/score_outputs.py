@@ -220,6 +220,7 @@ def score_outputs(
     output_path: Path,
     relative_tolerance: float,
     allow_output_outside_submission_data: bool,
+    overwrite: bool,
 ) -> int:
     if relative_tolerance < 0:
         raise ValueError("--relative-tolerance must be non-negative")
@@ -227,6 +228,8 @@ def score_outputs(
     references = read_jsonl(references_path)
     predictions, duplicate_predictions = prediction_index(read_jsonl(predictions_path))
     resolved_output = ensure_output_under_submission_data(output_path, allow_output_outside_submission_data)
+    if resolved_output.exists() and not overwrite:
+        raise ValueError(f"output file already exists; pass --overwrite to replace it: {resolved_output}")
 
     seen_reference_ids: set[str] = set()
     scored_rows: list[dict[str, Any]] = []
@@ -295,6 +298,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Allow --output outside submission/data/. Use only for explicit local experiments.",
     )
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing scored output file.")
     return parser.parse_args(argv)
 
 
@@ -307,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
             output_path=args.output,
             relative_tolerance=args.relative_tolerance,
             allow_output_outside_submission_data=args.allow_output_outside_submission_data,
+            overwrite=args.overwrite,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)

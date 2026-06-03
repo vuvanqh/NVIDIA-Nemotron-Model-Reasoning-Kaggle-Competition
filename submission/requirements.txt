@@ -6,4 +6,5 @@ peft
 safetensors
 torch
 transformers
+mamba-ssm
 trl

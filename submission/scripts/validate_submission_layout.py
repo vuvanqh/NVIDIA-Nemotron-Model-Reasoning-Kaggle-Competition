@@ -25,7 +25,7 @@ REQUIRED_DIRS = [
 
 REQUIRED_FILES = [
     "README.md",
-    "REPO_STATE.md",
+    "WHAT_HAS_BEEN_DONE_AND_TODO.md",
     "requirements.txt",
     "__init__.py",
     "configs/lora_config.example.yaml",
@@ -33,6 +33,8 @@ REQUIRED_FILES = [
     "scripts/__init__.py",
     "scripts/analyze_errors.py",
     "scripts/build_sft_jsonl.py",
+    "scripts/check_env.py",
+    "scripts/check_model_cache.py",
     "scripts/inspect_data.py",
     "scripts/make_eval_subset.py",
     "scripts/make_prediction_template.py",
@@ -43,6 +45,10 @@ REQUIRED_FILES = [
     "scripts/train_lora_sft.py",
     "scripts/validate_adapter.py",
     "scripts/validate_submission_layout.py",
+    "vendor/mamba_ssm/__init__.py",
+    "vendor/mamba_ssm/ops/__init__.py",
+    "vendor/mamba_ssm/ops/triton/__init__.py",
+    "vendor/mamba_ssm/ops/triton/layernorm_gated.py",
     "data/README.md",
     "adapters/README.md",
     "submission_zip/README.md",
@@ -58,6 +64,8 @@ ADAPTER_MARKERS = [
 TOOL_FILES = {
     "data inspector": "scripts/inspect_data.py",
     "SFT builder": "scripts/build_sft_jsonl.py",
+    "environment checker": "scripts/check_env.py",
+    "model cache checker": "scripts/check_model_cache.py",
     "eval subset builder": "scripts/make_eval_subset.py",
     "prediction template builder": "scripts/make_prediction_template.py",
     "local proxy scorer": "scripts/score_outputs.py",

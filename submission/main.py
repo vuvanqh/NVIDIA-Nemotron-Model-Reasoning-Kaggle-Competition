@@ -15,6 +15,8 @@ if __package__ in {None, ""}:
     from submission.scripts import (
         analyze_errors,
         build_sft_jsonl,
+        check_env,
+        check_model_cache,
         inspect_data,
         make_eval_subset,
         make_prediction_template,
@@ -29,6 +31,8 @@ else:
     from .scripts import (
         analyze_errors,
         build_sft_jsonl,
+        check_env,
+        check_model_cache,
         inspect_data,
         make_eval_subset,
         make_prediction_template,
@@ -45,6 +49,8 @@ COMMANDS = {
     "validate": validate_submission_layout.main,
     "inspect-data": inspect_data.main,
     "build-sft": build_sft_jsonl.main,
+    "check-env": check_env.main,
+    "check-model-cache": check_model_cache.main,
     "make-eval-subset": make_eval_subset.main,
     "make-prediction-template": make_prediction_template.main,
     "score-outputs": score_outputs.main,
@@ -63,6 +69,8 @@ def print_help() -> None:
     print("  validate      Validate local submission workspace layout")
     print("  inspect-data  Inspect a prepared JSONL data file")
     print("  build-sft     Build SFT-style JSONL under submission/data/")
+    print("  check-env     Check local training/inference dependency availability")
+    print("  check-model-cache  Check a local model cache without loading weights")
     print("  make-eval-subset  Build a small local proxy eval subset")
     print("  make-prediction-template  Build an empty prediction JSONL template")
     print("  score-outputs  Score predictions with the local proxy metric")
