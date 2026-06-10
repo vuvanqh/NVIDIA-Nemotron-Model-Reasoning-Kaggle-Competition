@@ -3,9 +3,12 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-READY_TO_TRAIN = "nemotron_ready_to_train.jsonl"
-TRAIN_OUTPUT = "nemotron_train_v1.jsonl"
-VAL_OUTPUT = "nemotron_val_v1.jsonl"
+# READY_TO_TRAIN = "nemotron_ready_to_train.jsonl"
+# TRAIN_OUTPUT = "nemotron_train_v1.jsonl"
+# VAL_OUTPUT = "nemotron_val_v1.jsonl"
+READY_TO_TRAIN = "whole_data_with_cot_to_process.jsonl"
+TRAIN_OUTPUT = "nemotron_train_v2.jsonl"
+VAL_OUTPUT = "nemotron_val_v2.jsonl"
 
 def classify_task(prompt):
     prompt_lower = str(prompt).lower()
