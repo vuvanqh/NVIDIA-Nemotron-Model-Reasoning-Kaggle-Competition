@@ -1,0 +1,10 @@
+# Submission-only dependencies for future Nemotron LoRA work.
+# Install in a disposable environment when needed; this scaffold does not install them.
+accelerate
+datasets
+peft
+safetensors
+torch
+transformers
+mamba-ssm
+trl

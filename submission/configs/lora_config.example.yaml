@@ -1,0 +1,41 @@
+# Example configuration for a future Nemotron LoRA run.
+# This file is documentation-oriented and is not consumed by the current scaffold.
+
+model:
+  # Replace with the exact Kaggle model handle or local path used by the training runtime.
+  base_model: metric/nemotron-3-nano-30b-a3b-bf16/transformers/default
+  local_model_path: null
+
+data:
+  # These paths point to read-only repo context observed during setup.
+  train_file: ../data_prep/nemotron_train_v1.jsonl
+  validation_file: ../data_prep/nemotron_val_v1.jsonl
+  prompt_field: puzzle
+  response_field: output
+  answer_field: target_answer
+  task_type_field: task_type
+
+sequence:
+  max_length: 1024
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  output_dir: adapters/nemotron_lora
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0002
+  num_train_epochs: 1
+  logging_steps: 10
+  save_strategy: epoch
+
+packaging:
+  output_dir: submission_zip

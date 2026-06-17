@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local IDE and transient smoke-run artifacts
+.idea/
+submission/reports/inference_smoke_*.log
+submission/reports/inference_smoke_*.txt
